@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import __version__
 from .config import get_settings
 from .embeddings import EmbeddingConfigError, EmbeddingError, make_embedding_function
 from .ingest import IngestService
@@ -151,6 +152,6 @@ def last_profile(company: str, state: AppState = Depends(get_state)) -> CompanyP
     return saved
 
 
-app = FastAPI(title="Seek - 企业信息检索 RAG 助手", version="0.2.1")
+app = FastAPI(title="Seek - 企业信息检索 RAG 助手", version=__version__)
 app.include_router(api)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

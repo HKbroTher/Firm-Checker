@@ -5,6 +5,9 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = Path(SPECPATH).parent
+sys.path.insert(0, str(ROOT))
+from app import __version__  # noqa: E402
+
 datas = [(str(ROOT / "app" / "static"), "app/static")]
 binaries = []
 hiddenimports = collect_submodules("uvicorn") + collect_submodules("app")
@@ -57,7 +60,8 @@ if sys.platform == "darwin":
         bundle_identifier="app.seek.desktop",
         info_plist={
             "CFBundleDisplayName": "Seek",
-            "CFBundleShortVersionString": "0.2.1",
+            "CFBundleShortVersionString": __version__,
+            "CFBundleVersion": __version__,
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
         },

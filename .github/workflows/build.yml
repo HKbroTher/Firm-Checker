@@ -27,13 +27,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            artifact: Seek-Windows-x64
-          - os: macos-latest
-            artifact: Seek-macOS-arm64
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,51 +37,94 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt pyinstaller
+
+      - name: Read version
+        shell: bash
+        run: |
+          VERSION=$(python -c "import app; print(app.__version__)")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # 发布时 tag 必须与代码中的版本号一致，避免发错版本
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF#refs/tags/v}" != "$VERSION" ]]; then
+            echo "::error::tag ${GITHUB_REF#refs/tags/} does not match app/__init__.py version $VERSION"
+            exit 1
+          fi
+
       - run: pyinstaller --noconfirm packaging/seek.spec
 
-      - name: Self-test (Windows)
+      # ---------- Windows：安装包 + 免安装版 ----------
+      - name: Self-test portable build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # 模拟用户从网上下载 zip 后解压：给文件加上“来自 Internet”标记。
+          # 模拟从网上下载 zip 后解压：给文件加上“来自 Internet”标记。
           # Seek.exe 本身除外：带标记的 exe 启动时会弹出安全确认框（用户点“运行”即可），CI 中无人点击会一直卡住
           Get-ChildItem dist\Seek -Recurse -File | Where-Object { $_.Name -ne "Seek.exe" } | ForEach-Object {
             Set-Content -Path $_.FullName -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
           }
-          # 窗口程序不会阻塞终端，需要等待进程结束再检查退出码
-          function Invoke-SelfTest($name) {
-            $env:SEEK_DATA_DIR = "$env:RUNNER_TEMP\$name"
-            $p = Start-Process -FilePath "dist\Seek\Seek.exe" -ArgumentList "--self-test" -PassThru
-            $null = $p.Handle  # 先取句柄，否则进程结束后 ExitCode 可能为空
-            if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Host "self-test timed out"; return 124 }
-            # 日志用 Write-Host 输出，避免混进函数返回值
-            if (Test-Path "$env:SEEK_DATA_DIR\seek.log") { Get-Content "$env:SEEK_DATA_DIR\seek.log" -Tail 8 | Write-Host }
-            return $p.ExitCode
-          }
           # 确认去掉 .config 时能复现加载失败，说明测试有效
           Rename-Item dist\Seek\Seek.exe.config Seek.exe.config.off
-          $without = Invoke-SelfTest "selftest-noconfig"
+          & packaging\selftest.ps1 -Exe dist\Seek\Seek.exe -Name selftest-noconfig
+          Write-Host "exit code without config: $LASTEXITCODE"
           Rename-Item dist\Seek\Seek.exe.config.off Seek.exe.config
-          Write-Host "exit code without config: $without"
-          $with = Invoke-SelfTest "selftest"
-          if ($with -ne 0) { throw "self-test failed: $with" }
-          Remove-Item -Recurse -Force "$env:RUNNER_TEMP\selftest*"
-      - name: Self-test (macOS)
-        if: runner.os == 'macOS'
-        run: SEEK_DATA_DIR="$RUNNER_TEMP/seek-selftest" dist/Seek.app/Contents/MacOS/Seek --self-test
+          & packaging\selftest.ps1 -Exe dist\Seek\Seek.exe -Name selftest-portable
+          if ($LASTEXITCODE -ne 0) { throw "portable self-test failed: $LASTEXITCODE" }
+          # 打包前去掉测试加上的标记
+          Get-ChildItem dist\Seek -Recurse -File | ForEach-Object { Unblock-File $_.FullName }
 
-      - name: Package (Windows)
+      - name: Build installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist\Seek -DestinationPath "${{ matrix.artifact }}.zip"
-      - name: Package (macOS)
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc /Qp "/DAppVersion=$env:VERSION" packaging\seek.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed: $LASTEXITCODE" }
+
+      - name: Install, self-test and uninstall (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = "dist\Seek-Setup-$env:VERSION-x64.exe"
+          $dir = Join-Path $env:RUNNER_TEMP "SeekInstall"
+          $p = Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=`"$dir`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer failed: $($p.ExitCode)" }
+          & packaging\selftest.ps1 -Exe "$dir\Seek.exe" -Name selftest-installed
+          if ($LASTEXITCODE -ne 0) { throw "installed self-test failed: $LASTEXITCODE" }
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          # 卸载程序会复制自身到临时目录后执行，等待安装目录被删除
+          for ($i = 0; $i -lt 60 -and (Test-Path "$dir\Seek.exe"); $i++) { Start-Sleep 1 }
+          if (Test-Path "$dir\Seek.exe") { throw "uninstall did not remove Seek.exe" }
+
+      - name: Collect files (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Move-Item "dist\Seek-Setup-$env:VERSION-x64.exe" out\
+          Compress-Archive -Path dist\Seek -DestinationPath "out\Seek-$env:VERSION-Windows-x64-portable.zip"
+
+      # ---------- macOS：DMG ----------
+      - name: Build DMG (macOS)
         if: runner.os == 'macOS'
-        run: ditto -c -k --keepParent dist/Seek.app "${{ matrix.artifact }}.zip"
+        run: |
+          mkdir -p dmg out
+          cp -R dist/Seek.app dmg/
+          ln -s /Applications dmg/Applications   # 打开 DMG 后把 Seek 拖到这个图标上即可安装
+          hdiutil create -volname "Seek" -srcfolder dmg -ov -format UDZO "out/Seek-$VERSION-macOS-arm64.dmg"
+
+      - name: Self-test from DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          MOUNT=$(hdiutil attach -nobrowse -readonly "out/Seek-$VERSION-macOS-arm64.dmg" | tail -1 | cut -f3)
+          SEEK_DATA_DIR="$RUNNER_TEMP/seek-selftest" "$MOUNT/Seek.app/Contents/MacOS/Seek" --self-test
+          hdiutil detach "$MOUNT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.zip
+          name: Seek-${{ runner.os }}
+          path: out/*
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -99,5 +138,8 @@ jobs:
           path: artifacts
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
           generate_release_notes: true

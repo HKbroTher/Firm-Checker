@@ -10,14 +10,15 @@ Seek 是一个桌面软件：给出企业名称和官网、新闻稿等公开资
 
 ## 下载安装
 
-在 GitHub 仓库的 **Actions → Build desktop apps** 中打开最近一次成功的运行，在页面底部的 Artifacts 下载：
+到 [Releases 页面](https://github.com/HKbroTher/Seek/releases/latest) 下载最新版本：
 
 | 系统 | 文件 | 安装方式 |
 |---|---|---|
-| Windows 10/11 | `Seek-Windows-x64.zip` | 解压后双击 `Seek\Seek.exe` |
-| macOS 11+（Apple 芯片） | `Seek-macOS-arm64.zip` | 解压后把 `Seek.app` 拖进「应用程序」 |
+| Windows 10/11 | `Seek-Setup-<版本>-x64.exe` | **推荐**。双击按向导安装，会创建开始菜单（可选桌面）快捷方式；不需要管理员权限；在「设置 → 应用」中卸载 |
+| Windows 10/11 | `Seek-<版本>-Windows-x64-portable.zip` | 免安装版，解压后双击 `Seek\Seek.exe` |
+| macOS 11+（Apple 芯片） | `Seek-<版本>-macOS-arm64.dmg` | 打开后把 Seek 拖到「Applications」图标上 |
 
-发布正式版本时（推送 `v*` 标签，如 `git tag v0.2.1 && git push origin v0.2.1`），安装包会自动出现在 **Releases** 页面。
+升级时直接安装新版本即可，设置、资料和画像都会保留（它们存放在数据目录，见下文）；卸载也不会删除这些数据。
 
 **首次打开的提示**
 
@@ -113,9 +114,13 @@ pip install pyinstaller
 pyinstaller --noconfirm packaging/seek.spec
 # Windows: dist/Seek/Seek.exe    macOS: dist/Seek.app
 dist/Seek/Seek --self-test     # 冒烟测试
+# Windows 安装包（需要 Inno Setup 6）：
+iscc /DAppVersion=0.2.2 packaging/seek.iss   # 生成 dist/Seek-Setup-0.2.2-x64.exe
 ```
 
-`.github/workflows/build.yml` 会在推送到 master 时运行测试，并在 Windows 和 macOS 上打包和自检；推送 `v*` 标签时发布 Release。
+`.github/workflows/build.yml` 会在推送到 master 时运行测试，并在 Windows 和 macOS 上打包、安装、自检。
+
+**发布新版本**：先修改 `app/__init__.py` 中的 `__version__` 并推送，再在 GitHub 的 Releases 页面新建同名标签（如 `v0.2.2`）的 Release。构建完成后，安装包会自动附加到这个 Release。标签与代码中的版本号不一致时构建会失败。
 
 ### 架构
 
