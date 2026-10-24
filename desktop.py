@@ -63,7 +63,35 @@ def _self_test(base_url: str) -> None:
 
     store = VectorStore(chromadb.EphemeralClient(), "selftest", HashEmbeddingFunction())
     assert store.companies() == {}
+    if sys.platform == "win32":
+        # 窗口组件依赖 pythonnet 加载 .NET 程序集，这一步最容易因系统安全策略失败
+        import clr  # noqa: F401
+        from System import Environment  # noqa: F401
     print(f"self-test ok (data dir: {get_settings().data_dir})")
+
+
+def _run_in_browser(url: str) -> None:
+    import webbrowser
+
+    webbrowser.open(url)
+    _message_box(
+        "Seek 窗口组件无法启动，已改为在浏览器中打开。\n\n"
+        f"地址：{url}\n\n使用期间请不要关闭这个提示框；点「确定」会退出 Seek。"
+    )
+
+
+def _message_box(text: str) -> None:
+    """阻塞显示提示框；关闭提示框即退出。非 Windows 系统退化为等待服务线程。"""
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, text, APP_TITLE, 0x40)
+    else:
+        logging.warning(text)
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
 
 
 def _run_self_test(port: int) -> None:
@@ -108,12 +136,16 @@ def main() -> None:
             server.should_exit = True
         return
 
-    import webview
+    try:
+        import webview
 
-    webview.settings["ALLOW_DOWNLOADS"] = True  # 允许导出 Markdown / JSON
-    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True  # 来源链接用系统浏览器打开
-    webview.create_window(APP_TITLE, url, width=1240, height=840, min_size=(860, 600))
-    webview.start(private_mode=False, storage_path=str(get_settings().data_dir / "webview"))
+        webview.settings["ALLOW_DOWNLOADS"] = True  # 允许导出 Markdown / JSON
+        webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True  # 来源链接用系统浏览器打开
+        webview.create_window(APP_TITLE, url, width=1240, height=840, min_size=(860, 600))
+        webview.start(private_mode=False, storage_path=str(get_settings().data_dir / "webview"))
+    except Exception:  # noqa: BLE001 - 窗口组件不可用时退回浏览器，而不是直接崩溃
+        logging.exception("failed to open desktop window, falling back to browser")
+        _run_in_browser(url)
     server.should_exit = True
     thread.join(timeout=5)
     os._exit(0)  # 确保后台线程（如 Chroma）不会阻止退出

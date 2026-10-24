@@ -46,11 +46,25 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # 模拟用户从网上下载 zip 后解压：给所有文件加上“来自 Internet”标记
+          Get-ChildItem dist\Seek -Recurse -File | ForEach-Object {
+            Set-Content -Path $_.FullName -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
+          }
           # 窗口程序不会阻塞终端，需要等待进程结束再检查退出码
-          $env:SEEK_DATA_DIR = "$env:RUNNER_TEMP\seek-selftest"
-          $p = Start-Process -FilePath "dist\Seek\Seek.exe" -ArgumentList "--self-test" -Wait -PassThru
-          Get-Content "$env:SEEK_DATA_DIR\seek.log" -Tail 20
-          if ($p.ExitCode -ne 0) { throw "self-test failed: $($p.ExitCode)" }
+          function Invoke-SelfTest($name) {
+            $env:SEEK_DATA_DIR = "$env:RUNNER_TEMP\$name"
+            $p = Start-Process -FilePath "dist\Seek\Seek.exe" -ArgumentList "--self-test" -Wait -PassThru
+            Get-Content "$env:SEEK_DATA_DIR\seek.log" -Tail 8
+            return $p.ExitCode
+          }
+          # 确认去掉 .config 时能复现加载失败，说明测试有效
+          Rename-Item dist\Seek\Seek.exe.config Seek.exe.config.off
+          $without = Invoke-SelfTest "selftest-noconfig"
+          Rename-Item dist\Seek\Seek.exe.config.off Seek.exe.config
+          Write-Host "exit code without config: $without"
+          $with = Invoke-SelfTest "selftest"
+          if ($with -ne 0) { throw "self-test failed: $with" }
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP\selftest*"
       - name: Self-test (macOS)
         if: runner.os == 'macOS'
         run: SEEK_DATA_DIR="$RUNNER_TEMP/seek-selftest" dist/Seek.app/Contents/MacOS/Seek --self-test

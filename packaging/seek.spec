@@ -43,6 +43,12 @@ exe = EXE(
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="Seek")
 
+if sys.platform == "win32":
+    import shutil
+
+    # .NET 只读取与 exe 同目录、同名的 .config 文件
+    shutil.copy(ROOT / "packaging" / "Seek.exe.config", Path(DISTPATH) / "Seek" / "Seek.exe.config")
+
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
