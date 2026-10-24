@@ -33,6 +33,7 @@ jobs:
           - os: macos-latest
             artifact: Seek-macOS-arm64
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,15 +47,19 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # 模拟用户从网上下载 zip 后解压：给所有文件加上“来自 Internet”标记
-          Get-ChildItem dist\Seek -Recurse -File | ForEach-Object {
+          # 模拟用户从网上下载 zip 后解压：给文件加上“来自 Internet”标记。
+          # Seek.exe 本身除外：带标记的 exe 启动时会弹出安全确认框（用户点“运行”即可），CI 中无人点击会一直卡住
+          Get-ChildItem dist\Seek -Recurse -File | Where-Object { $_.Name -ne "Seek.exe" } | ForEach-Object {
             Set-Content -Path $_.FullName -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
           }
           # 窗口程序不会阻塞终端，需要等待进程结束再检查退出码
           function Invoke-SelfTest($name) {
             $env:SEEK_DATA_DIR = "$env:RUNNER_TEMP\$name"
-            $p = Start-Process -FilePath "dist\Seek\Seek.exe" -ArgumentList "--self-test" -Wait -PassThru
-            Get-Content "$env:SEEK_DATA_DIR\seek.log" -Tail 8
+            $p = Start-Process -FilePath "dist\Seek\Seek.exe" -ArgumentList "--self-test" -PassThru
+            $null = $p.Handle  # 先取句柄，否则进程结束后 ExitCode 可能为空
+            if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Host "self-test timed out"; return 124 }
+            # 日志用 Write-Host 输出，避免混进函数返回值
+            if (Test-Path "$env:SEEK_DATA_DIR\seek.log") { Get-Content "$env:SEEK_DATA_DIR\seek.log" -Tail 8 | Write-Host }
             return $p.ExitCode
           }
           # 确认去掉 .config 时能复现加载失败，说明测试有效
