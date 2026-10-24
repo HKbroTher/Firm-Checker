@@ -1,22 +1,22 @@
-from functools import lru_cache
-from typing import Literal
+"""运行参数（切分、检索、抓取等）。API 服务商与密钥由用户在界面中设置，见 user_settings.py。"""
 
+from functools import lru_cache
+from pathlib import Path
+
+from platformdirs import user_data_dir
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+APP_NAME = "Seek"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="SEEK_", extra="ignore")
 
-    llm_model: str = "claude-opus-5-5"
-    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
-    llm_max_tokens: int = 16000
-
-    chroma_dir: str = "./data/chroma"
+    # 数据目录：用户设置、向量库、历史画像都存放在这里
+    data_dir: Path = Path(user_data_dir(APP_NAME, appauthor=False))
     collection_name: str = "company_docs"
-    # bge-m3：多语言（含中文）向量模型，1024 维；default：Chroma 内置 all-MiniLM-L6-v2（英文为主）；hash：离线测试用
-    embedding_backend: Literal["bge-m3", "default", "hash"] = "bge-m3"
-    embedding_model: str = "BAAI/bge-m3"
-    embedding_device: str = "cpu"  # 有 GPU 时设为 cuda
+
+    llm_max_tokens: int = 16000
 
     chunk_size: int = 800
     chunk_overlap: int = 150
@@ -28,7 +28,19 @@ class Settings(BaseSettings):
     # 抓取
     fetch_timeout: float = 20.0
     max_crawl_pages: int = 10
-    user_agent: str = "FirmChecker/0.1 (+company research bot)"
+    user_agent: str = "Seek/0.2 (+company research assistant)"
+
+    @property
+    def chroma_dir(self) -> Path:
+        return self.data_dir / "chroma"
+
+    @property
+    def settings_file(self) -> Path:
+        return self.data_dir / "settings.json"
+
+    @property
+    def profiles_dir(self) -> Path:
+        return self.data_dir / "profiles"
 
 
 @lru_cache

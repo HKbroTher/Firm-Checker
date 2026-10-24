@@ -1,90 +1,156 @@
-from contextlib import asynccontextmanager
-from functools import lru_cache
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from .config import get_settings
-from .fetcher import Fetcher
+from .embeddings import EmbeddingConfigError, EmbeddingError, make_embedding_function
 from .ingest import IngestService
-from .llm import ClaudeClient, LLMError
+from .llm import LLMConfigError, LLMError
 from .models import CompanyProfile, IngestRequest, IngestResponse, ProfileRequest, SearchHit, SearchRequest
 from .profiler import InsufficientDataError, Profiler
-from .vectorstore import VectorStore
+from .state import AppState
+from .user_settings import EMBEDDING_PRESETS, LLM_PRESETS, UserSettings, merge_update, public_view
 
-@lru_cache
-def get_store() -> VectorStore:
-    s = get_settings()
-    return VectorStore.persistent(
-        s.chroma_dir, s.collection_name, s.embedding_backend, s.embedding_model, s.embedding_device
-    )
+STATIC_DIR = Path(__file__).parent / "static"
+
+_state: AppState | None = None
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    # 启动时加载向量模型，避免首个请求等待模型加载，模型缺失也能在启动阶段暴露
-    get_store()
-    yield
+def get_state() -> AppState:
+    global _state
+    if _state is None:
+        _state = AppState(get_settings())
+    return _state
 
 
-app = FastAPI(title="Firm Checker - 企业信息检索 RAG 助手", version="0.1.0", lifespan=lifespan)
+def _service_error(exc: Exception) -> HTTPException:
+    """设置类问题返回 400（界面引导去设置页），服务调用失败返回 502。"""
+    if isinstance(exc, (LLMConfigError, EmbeddingConfigError)):
+        return HTTPException(400, str(exc))
+    return HTTPException(502, str(exc))
 
 
-@lru_cache
-def get_fetcher() -> Fetcher:
-    s = get_settings()
-    return Fetcher(timeout=s.fetch_timeout, user_agent=s.user_agent)
+api = APIRouter(prefix="/api")
 
 
-@lru_cache
-def get_llm() -> ClaudeClient:
-    s = get_settings()
-    return ClaudeClient(model=s.llm_model, effort=s.llm_effort, max_tokens=s.llm_max_tokens)
-
-
-def get_ingest_service(store: VectorStore = Depends(get_store), fetcher: Fetcher = Depends(get_fetcher)) -> IngestService:
-    s = get_settings()
-    return IngestService(store, fetcher, s.chunk_size, s.chunk_overlap, s.max_crawl_pages)
-
-
-def get_profiler(store: VectorStore = Depends(get_store), llm: ClaudeClient = Depends(get_llm)) -> Profiler:
-    s = get_settings()
-    return Profiler(store, llm, s.retrieval_top_k, s.max_context_chunks)
-
-
-@app.get("/health")
+@api.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/ingest", response_model=IngestResponse)
-def ingest(req: IngestRequest, service: IngestService = Depends(get_ingest_service)) -> IngestResponse:
-    if not req.urls and not req.documents:
-        raise HTTPException(422, "provide at least one url or document")
-    return service.ingest(req)
+# ---------- 设置 ----------
+
+@api.get("/presets")
+def presets() -> dict:
+    return {"llm": LLM_PRESETS, "embedding": EMBEDDING_PRESETS}
 
 
-@app.post("/search", response_model=list[SearchHit])
-def search(req: SearchRequest, store: VectorStore = Depends(get_store)) -> list[SearchHit]:
-    return store.search(req.company, req.query, req.top_k)
+@api.get("/settings")
+def read_settings(state: AppState = Depends(get_state)) -> dict:
+    return public_view(state.user_settings())
 
 
-@app.post("/profile", response_model=CompanyProfile)
-def profile(req: ProfileRequest, profiler: Profiler = Depends(get_profiler)) -> CompanyProfile:
+@api.put("/settings")
+def update_settings(update: UserSettings, state: AppState = Depends(get_state)) -> dict:
+    merged = merge_update(state.user_settings(), update)
+    state.save_settings(merged)
+    return public_view(merged)
+
+
+class CheckResult(BaseModel):
+    ok: bool
+    message: str
+
+
+@api.post("/settings/test")
+def test_settings(candidate: UserSettings, state: AppState = Depends(get_state)) -> dict[str, CheckResult]:
+    """用界面上尚未保存的设置测试连通性；密钥留空时使用已保存的密钥。"""
+    settings = merge_update(state.user_settings(), candidate)
+    results: dict[str, CheckResult] = {}
+
     try:
-        return profiler.generate(req.company, req.language)
-    except InsufficientDataError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except LLMError as exc:
-        raise HTTPException(502, str(exc)) from exc
+        llm = state.llm_for(settings.llm)
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"],
+                  "additionalProperties": False}
+        llm.generate_json("你是连通性测试助手。", '请返回 {"ok": true}', schema)
+        results["llm"] = CheckResult(ok=True, message=f"连接成功（{settings.llm.model}）")
+    except Exception as exc:  # noqa: BLE001 - 原样展示给用户
+        results["llm"] = CheckResult(ok=False, message=str(exc))
+
+    try:
+        vector = make_embedding_function(settings.embedding)(["连通性测试"])[0]
+        results["embedding"] = CheckResult(ok=True, message=f"连接成功（{settings.embedding.model}，{len(vector)} 维）")
+    except Exception as exc:  # noqa: BLE001
+        results["embedding"] = CheckResult(ok=False, message=str(exc))
+    return results
 
 
-@app.get("/companies")
-def companies(store: VectorStore = Depends(get_store)) -> dict[str, int]:
-    """已入库的企业及其切片数量。"""
-    return store.companies()
+# ---------- 资料 ----------
+
+@api.post("/ingest", response_model=IngestResponse)
+def ingest(req: IngestRequest, state: AppState = Depends(get_state)) -> IngestResponse:
+    if not req.urls and not req.documents:
+        raise HTTPException(422, "请至少提供一个网址或一段文本资料")
+    c = state.config
+    try:
+        service = IngestService(state.store(), state.fetcher, c.chunk_size, c.chunk_overlap, c.max_crawl_pages)
+        return service.ingest(req)
+    except EmbeddingError as exc:
+        raise _service_error(exc) from exc
 
 
-@app.delete("/companies/{company}")
-def delete_company(company: str, store: VectorStore = Depends(get_store)) -> dict[str, str]:
-    store.delete_company(company)
+@api.post("/search", response_model=list[SearchHit])
+def search(req: SearchRequest, state: AppState = Depends(get_state)) -> list[SearchHit]:
+    try:
+        return state.store().search(req.company, req.query, req.top_k)
+    except EmbeddingError as exc:
+        raise _service_error(exc) from exc
+
+
+@api.get("/companies")
+def companies(state: AppState = Depends(get_state)) -> dict[str, int]:
+    """当前向量模型下已入库的企业及其切片数量。"""
+    try:
+        return state.store().companies()
+    except EmbeddingError as exc:
+        raise _service_error(exc) from exc
+
+
+@api.delete("/companies/{company}")
+def delete_company(company: str, state: AppState = Depends(get_state)) -> dict[str, str]:
+    try:
+        state.store().delete_company(company)
+    except EmbeddingError as exc:
+        raise _service_error(exc) from exc
+    state.history.delete(company)
     return {"deleted": company}
+
+
+# ---------- 画像 ----------
+
+@api.post("/profile", response_model=CompanyProfile)
+def profile(req: ProfileRequest, state: AppState = Depends(get_state)) -> CompanyProfile:
+    try:
+        profiler = Profiler(state.store(), state.llm(), state.config.retrieval_top_k, state.config.max_context_chunks)
+        result = profiler.generate(req.company, req.language)
+    except InsufficientDataError as exc:
+        raise HTTPException(404, f"还没有「{req.company}」的资料，请先在「资料入库」中添加") from exc
+    except (LLMError, EmbeddingError) as exc:
+        raise _service_error(exc) from exc
+    state.history.save(result)
+    return result
+
+
+@api.get("/profile/{company}", response_model=CompanyProfile)
+def last_profile(company: str, state: AppState = Depends(get_state)) -> CompanyProfile:
+    saved = state.history.load(company)
+    if saved is None:
+        raise HTTPException(404, "暂无历史画像")
+    return saved
+
+
+app = FastAPI(title="Seek - 企业信息检索 RAG 助手", version="0.2.0")
+app.include_router(api)
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

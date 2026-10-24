@@ -1,68 +1,12 @@
 """ChromaDB 向量库封装：按企业隔离检索，保存来源元数据用于引用。"""
 
-import hashlib
-import math
-import re
 from typing import Any
 
 import chromadb
-from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
-from chromadb.utils.embedding_functions import (
-    DefaultEmbeddingFunction,
-    SentenceTransformerEmbeddingFunction,
-    register_embedding_function,
-)
+from chromadb.api.types import EmbeddingFunction
+from chromadb.config import Settings as ChromaSettings
 
 from .models import Chunk, SearchHit
-
-
-@register_embedding_function
-class HashEmbeddingFunction(EmbeddingFunction[Documents]):
-    """离线可用的字符 n-gram 哈希向量，无需下载模型；语义能力有限，适合测试与演示。"""
-
-    def __init__(self, dim: int = 512):
-        self.dim = dim
-
-    def __call__(self, input: Documents) -> Embeddings:
-        return [self._embed(text) for text in input]
-
-    def _embed(self, text: str) -> list[float]:
-        vec = [0.0] * self.dim
-        text = text.lower()
-        # 英文按单词、中文按字的 1/2-gram
-        tokens = re.findall(r"[a-z0-9]+", text)
-        cjk = re.findall(r"[一-鿿]", text)
-        tokens += cjk + [a + b for a, b in zip(cjk, cjk[1:])]
-        for tok in tokens:
-            h = int.from_bytes(hashlib.md5(tok.encode()).digest()[:4], "little")
-            vec[h % self.dim] += 1.0 if (h >> 31) == 0 else -1.0
-        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-        return [v / norm for v in vec]
-
-    @staticmethod
-    def name() -> str:
-        return "firm_checker_hash"
-
-    def get_config(self) -> dict[str, Any]:
-        return {"dim": self.dim}
-
-    @staticmethod
-    def build_from_config(config: dict[str, Any]) -> "HashEmbeddingFunction":
-        return HashEmbeddingFunction(dim=config.get("dim", 512))
-
-
-def make_embedding_function(backend: str, model: str = "BAAI/bge-m3", device: str = "cpu") -> EmbeddingFunction:
-    if backend == "hash":
-        return HashEmbeddingFunction()
-    if backend == "bge-m3":
-        # 首次使用时从 Hugging Face 下载模型（约 2.3GB），可通过 HF_ENDPOINT 指定镜像
-        return SentenceTransformerEmbeddingFunction(model_name=model, device=device, normalize_embeddings=True)
-    return DefaultEmbeddingFunction()
-
-
-def collection_name_for(base: str, backend: str) -> str:
-    """不同向量模型的维度不同，各用一个集合，切换模型时不会和旧数据冲突。"""
-    return f"{base}_{backend}"
 
 
 def _metadata(chunk: Chunk) -> dict[str, Any]:
@@ -79,14 +23,9 @@ class VectorStore:
         )
 
     @classmethod
-    def persistent(
-        cls, path: str, collection_name: str, backend: str, model: str = "BAAI/bge-m3", device: str = "cpu"
-    ) -> "VectorStore":
-        return cls(
-            chromadb.PersistentClient(path=path),
-            collection_name_for(collection_name, backend),
-            make_embedding_function(backend, model, device),
-        )
+    def persistent(cls, path: str, collection_name: str, embedding_function: EmbeddingFunction) -> "VectorStore":
+        client = chromadb.PersistentClient(path=path, settings=ChromaSettings(anonymized_telemetry=False))
+        return cls(client, collection_name, embedding_function)
 
     def add_chunks(self, chunks: list[Chunk], batch_size: int = 128) -> None:
         for i in range(0, len(chunks), batch_size):

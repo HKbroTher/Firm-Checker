@@ -7,13 +7,13 @@ import pytest
 from app.llm import ClaudeClient, LLMError
 
 
-def _client(reply: dict, captured: list) -> ClaudeClient:
+def _client(reply: dict, captured: list, model: str = "claude-opus-5-5") -> ClaudeClient:
     def handler(request: httpx2.Request) -> httpx2.Response:
         captured.append((request.headers, json.loads(request.content)))
         return httpx2.Response(200, json=reply)
 
     sdk = anthropic.Anthropic(api_key="test", http_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
-    return ClaudeClient(model="claude-opus-5-5", effort="medium", max_tokens=1000, client=sdk)
+    return ClaudeClient(model=model, max_tokens=1000, client=sdk)
 
 
 def _message(stop_reason: str, text: str) -> dict:
@@ -42,3 +42,66 @@ def test_request_shape_and_parse():
 def test_bad_stop_reasons_raise(stop_reason):
     with pytest.raises(LLMError):
         _client(_message(stop_reason, "{}"), []).generate_json("s", "p", {})
+
+
+def test_fallback_only_for_supported_models():
+    captured: list = []
+    _client(_message("end_turn", "{}"), captured, model="claude-haiku-5-5").generate_json("s", "p", {})
+    headers, body = captured[0]
+    assert "fallbacks" not in body
+    assert "server-side-fallback" not in headers.get("anthropic-beta", "")
+
+
+# ---------- 兼容 OpenAI 接口的服务 ----------
+
+from types import SimpleNamespace  # noqa: E402
+
+from app.llm import LLMConfigError, OpenAICompatibleClient, make_llm  # noqa: E402
+from app.user_settings import LLMSettings  # noqa: E402
+
+
+class FakeChat:
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.calls = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        content, finish = self.replies.pop(0)
+        return SimpleNamespace(choices=[SimpleNamespace(finish_reason=finish, message=SimpleNamespace(content=content))])
+
+
+def test_openai_compatible_json_mode_and_schema_in_prompt():
+    fake = FakeChat([('{"ok": true}', "stop")])
+    llm = OpenAICompatibleClient("deepseek-chat", 4000, client=fake)
+    assert llm.generate_json("sys", "hi", {"type": "object", "properties": {"ok": {"type": "boolean"}}}) == {"ok": True}
+    call = fake.calls[0]
+    assert call["response_format"] == {"type": "json_object"}
+    assert call["model"] == "deepseek-chat"
+    assert '"ok"' in call["messages"][0]["content"]  # schema 写进了系统提示
+
+
+def test_openai_compatible_retries_invalid_json_once():
+    fake = FakeChat([("not json", "stop"), ('{"a": 1}', "stop")])
+    assert OpenAICompatibleClient("m", 100, client=fake).generate_json("s", "p", {}) == {"a": 1}
+    assert len(fake.calls) == 2
+    assert fake.calls[1]["messages"][-1]["role"] == "user"
+
+
+def test_openai_compatible_truncation_raises():
+    fake = FakeChat([('{"a":', "length")])
+    with pytest.raises(LLMError):
+        OpenAICompatibleClient("m", 100, client=fake).generate_json("s", "p", {})
+
+
+def test_make_llm_requires_key_and_picks_provider():
+    with pytest.raises(LLMConfigError):
+        make_llm(LLMSettings(api_key=""), 16000)
+    claude = make_llm(LLMSettings(api_key="k"), 16000)
+    assert isinstance(claude, ClaudeClient)
+    ds = make_llm(LLMSettings(preset="deepseek", provider="openai_compatible", api_key="k",
+                              base_url="https://api.deepseek.com", model="deepseek-chat"), 16000)
+    assert isinstance(ds, OpenAICompatibleClient) and ds.max_tokens == 8192
+    with pytest.raises(LLMConfigError):
+        make_llm(LLMSettings(provider="openai_compatible", api_key="k", base_url="", model="m"), 16000)

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seek</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- 侧边栏：研究历史 -->
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <div class="logo">
+        <svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="9" fill="currentColor"/>
+          <circle cx="14.5" cy="14.5" r="6.5" fill="none" stroke="#fff" stroke-width="2.6"/>
+          <path d="M19.5 19.5 24 24" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+        </svg>
+        <span class="logo-text">Seek</span>
+      </div>
+      <button class="icon-btn" id="btn-collapse" title="收起侧边栏" aria-label="收起侧边栏">
+        <svg viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M7.5 3.5v13"/></svg>
+      </button>
+    </div>
+
+    <button class="new-btn" id="btn-new">
+      <svg viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></svg>
+      新的研究
+    </button>
+
+    <div class="history">
+      <div class="history-label">最近研究</div>
+      <ul id="company-list"></ul>
+      <div class="history-empty" id="history-empty">还没有研究过的企业</div>
+    </div>
+
+    <button class="settings-btn" id="btn-settings">
+      <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
+      <span class="settings-text">
+        <span>设置</span>
+        <span class="model-name" id="model-name"></span>
+      </span>
+    </button>
+  </aside>
+
+  <!-- 主区域 -->
+  <main id="main" class="home">
+    <button class="icon-btn expand-btn" id="btn-expand" title="展开侧边栏" aria-label="展开侧边栏">
+      <svg viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M7.5 3.5v13"/></svg>
+    </button>
+
+    <header class="topbar" id="topbar">
+      <div class="topbar-title" id="topbar-title"></div>
+      <div class="topbar-actions" id="topbar-actions"></div>
+    </header>
+
+    <div class="scroll" id="scroll">
+      <div class="column">
+        <div class="greeting" id="greeting">
+          <svg class="greeting-mark" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="9" fill="currentColor"/>
+            <circle cx="14.5" cy="14.5" r="6.5" fill="none" stroke="#fff" stroke-width="2.6"/>
+            <path d="M19.5 19.5 24 24" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+          </svg>
+          <h1>今天想研究哪家企业？</h1>
+          <p>给出企业名称和官网、新闻稿等公开资料，Seek 会整理出业务线、产品类别和目标市场，每条结论都标注来源。</p>
+        </div>
+        <div id="thread"></div>
+      </div>
+    </div>
+
+    <!-- 输入框 -->
+    <div class="composer-wrap">
+      <div class="composer" id="composer">
+        <div class="attachments" id="attachments"></div>
+        <input id="c-company" class="c-company" placeholder="企业名称，例如：示例科技" autocomplete="off">
+        <textarea id="c-input" rows="2" placeholder="粘贴官网或新闻网址，每行一个"></textarea>
+        <div class="c-foot">
+          <div class="c-tools">
+            <button class="chip" id="c-attach" title="粘贴新闻稿、年报等文本">
+              <svg viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></svg>文本资料
+            </button>
+            <label class="chip toggle" id="c-crawl-chip" title="顺着站内链接继续抓取关于我们、产品、新闻等页面">
+              <input type="checkbox" id="c-crawl" checked><span>深入抓取</span>
+            </label>
+            <div class="seg" id="c-mode">
+              <button data-mode="add" class="active">补充资料</button>
+              <button data-mode="search">检索资料</button>
+            </div>
+            <select id="c-lang" class="chip-select" title="画像语言">
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <button class="send" id="c-send" aria-label="发送" title="发送（Ctrl/⌘ + Enter）">
+            <svg viewBox="0 0 20 20"><path d="M10 15.5v-11M5 9l5-5 5 5"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="c-note">Seek 只依据你提供的公开资料作答，请点开来源核实关键信息。</div>
+    </div>
+  </main>
+</div>
+
+<!-- 设置 -->
+<dialog id="dlg-settings" class="dialog wide">
+  <form method="dialog" class="dialog-body" id="settings-form">
+    <div class="dialog-head">
+      <h2>设置</h2>
+      <button class="icon-btn" value="cancel" aria-label="关闭"><svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+    </div>
+    <p class="dialog-intro" id="settings-intro">选择你自己的 API 服务商并填写密钥。密钥只保存在这台电脑上。</p>
+
+    <section class="settings-section">
+      <h3>大模型 <span>用于生成企业画像</span></h3>
+      <label class="field"><span>服务商</span><select id="llm-preset"></select></label>
+      <label class="field" id="llm-base-url-field"><span>接口地址（Base URL）</span><input id="llm-base-url" placeholder="https://api.example.com/v1"></label>
+      <label class="field"><span>模型</span><input id="llm-model" list="llm-models"><datalist id="llm-models"></datalist></label>
+      <label class="field"><span>API Key <a id="llm-key-link" target="_blank" rel="noopener">获取密钥 ↗</a></span><input id="llm-key" type="password" autocomplete="off"></label>
+      <div class="check-result" id="llm-check"></div>
+    </section>
+
+    <section class="settings-section">
+      <h3>向量化 <span>用于检索资料</span></h3>
+      <label class="field"><span>服务商</span><select id="emb-preset"></select></label>
+      <div id="emb-api-fields">
+        <label class="field"><span>接口地址（Base URL）</span><input id="emb-base-url"></label>
+        <div class="field-row">
+          <label class="field grow"><span>模型</span><input id="emb-model" list="emb-models"><datalist id="emb-models"></datalist></label>
+          <label class="field narrow"><span>每批条数</span><input id="emb-batch" type="number" min="1" max="256"></label>
+        </div>
+        <label class="field"><span>API Key <a id="emb-key-link" target="_blank" rel="noopener">获取密钥 ↗</a></span><input id="emb-key" type="password" autocomplete="off"></label>
+      </div>
+      <div class="check-result" id="emb-check"></div>
+      <p class="hint">更换向量化服务或模型后，之前的资料需要重新入库；切换回原来的模型，旧资料仍然可用。</p>
+    </section>
+
+    <div class="dialog-foot">
+      <button type="button" class="btn" id="btn-test-settings">测试连接</button>
+      <button type="button" class="btn primary" id="btn-save-settings">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 添加文本资料 -->
+<dialog id="dlg-doc" class="dialog">
+  <form method="dialog" class="dialog-body" id="doc-form">
+    <div class="dialog-head">
+      <h2>添加文本资料</h2>
+      <button class="icon-btn" value="cancel" aria-label="关闭"><svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+    </div>
+    <label class="field"><span>标题</span><input id="doc-title" placeholder="例如：示例科技发布新一代协作机器人"></label>
+    <div class="field-row">
+      <label class="field grow"><span>来源网址（用于标注引用，可留空）</span><input id="doc-url" placeholder="https://"></label>
+      <label class="field narrow"><span>类型</span>
+        <select id="doc-type">
+          <option value="press_release">新闻稿</option>
+          <option value="webpage">网页</option>
+          <option value="report">报告/年报</option>
+          <option value="other">其他</option>
+        </select>
+      </label>
+    </div>
+    <label class="field"><span>正文</span><textarea id="doc-text" rows="10" placeholder="粘贴正文"></textarea></label>
+    <div class="dialog-foot">
+      <button type="button" class="btn" value="cancel" onclick="this.closest('dialog').close()">取消</button>
+      <button type="button" class="btn primary" id="btn-doc-ok">添加</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>

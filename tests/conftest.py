@@ -5,7 +5,8 @@ import httpx
 import pytest
 
 from app.fetcher import Fetcher
-from app.vectorstore import HashEmbeddingFunction, VectorStore
+from app.embeddings import HashEmbeddingFunction
+from app.vectorstore import VectorStore
 
 PAGES = {
     "https://acme.example/": """<html><head><title>Acme 官网</title></head><body>
