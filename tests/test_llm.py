@@ -56,6 +56,9 @@ def test_fallback_only_for_supported_models():
 
 from types import SimpleNamespace  # noqa: E402
 
+import httpx  # noqa: E402
+import openai  # noqa: E402
+
 from app.llm import LLMConfigError, OpenAICompatibleClient, make_llm  # noqa: E402
 from app.user_settings import LLMSettings  # noqa: E402
 
@@ -105,3 +108,32 @@ def test_make_llm_requires_key_and_picks_provider():
     assert isinstance(ds, OpenAICompatibleClient) and ds.max_tokens == 8192
     with pytest.raises(LLMConfigError):
         make_llm(LLMSettings(provider="openai_compatible", api_key="k", base_url="", model="m"), 16000)
+
+
+class RejectsJsonMode(FakeChat):
+    """模拟不支持 response_format 的服务。"""
+
+    def create(self, **kwargs):
+        if "response_format" in kwargs:
+            self.calls.append(kwargs)
+            req = httpx.Request("POST", "https://example.invalid/chat/completions")
+            resp = httpx.Response(400, request=req, json={"error": {"message": "response_format unsupported"}})
+            raise openai.BadRequestError("response_format unsupported", response=resp, body=None)
+        return super().create(**kwargs)
+
+
+def test_openai_compatible_falls_back_without_json_mode():
+    fake = RejectsJsonMode([('```json\n{"ok": true}\n```', "stop"), ('{"n": 2}', "stop")])
+    llm = OpenAICompatibleClient("gemini-2.5-flash", 4000, client=fake)
+    assert llm.generate_json("s", "p", {}) == {"ok": True}  # 去掉 JSON 模式重试，并剥离代码块
+    assert "response_format" in fake.calls[0] and "response_format" not in fake.calls[1]
+    # 记住该服务不支持 JSON 模式，后续请求不再尝试
+    assert llm.generate_json("s", "p", {}) == {"n": 2}
+    assert "response_format" not in fake.calls[2]
+
+
+def test_strip_code_fence():
+    from app.llm import _strip_code_fence
+
+    assert _strip_code_fence('```json\n{"a": 1}\n```') == '{"a": 1}'
+    assert _strip_code_fence('{"a": 1}') == '{"a": 1}'

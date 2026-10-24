@@ -79,15 +79,25 @@ class OpenAICompatibleClient:
         self.model = model
         self.max_tokens = max_tokens
         self._client = client or openai.OpenAI(api_key=api_key, base_url=base_url or None, timeout=300)
+        self._json_mode = True
+
+    def _create(self, messages: list[dict]):
+        kwargs: dict[str, Any] = {"model": self.model, "messages": messages, "max_tokens": self.max_tokens}
+        if self._json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            return self._client.chat.completions.create(**kwargs)
+        except openai.BadRequestError:
+            if not self._json_mode:
+                raise
+            # 部分服务（或其中部分模型）不支持 JSON 模式，去掉后重试；提示词已要求只输出 JSON
+            self._json_mode = False
+            kwargs.pop("response_format")
+            return self._client.chat.completions.create(**kwargs)
 
     def _complete(self, messages: list[dict]) -> str:
         try:
-            resp = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                max_tokens=self.max_tokens,
-            )
+            resp = self._create(messages)
         except openai.AuthenticationError as exc:
             raise LLMConfigError("API Key 无效，请在设置中检查") from exc
         except openai.NotFoundError as exc:
@@ -103,7 +113,7 @@ class OpenAICompatibleClient:
             raise LLMError("模型输出被截断（达到 max_tokens 上限）")
         if choice.finish_reason == "content_filter":
             raise LLMError("模型服务商的内容审核拦截了本次请求")
-        return choice.message.content or ""
+        return _strip_code_fence(choice.message.content or "")
 
     def generate_json(self, system: str, prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
         system_full = (
@@ -125,6 +135,16 @@ class OpenAICompatibleClient:
                 return json.loads(text)
             except json.JSONDecodeError as exc2:
                 raise LLMError(f"模型返回的 JSON 无法解析：{exc2}") from exc2
+
+
+def _strip_code_fence(text: str) -> str:
+    """去掉模型偶尔包裹在 JSON 外面的 ```json 代码块标记。"""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    return text.strip()
 
 
 def make_llm(settings: LLMSettings, max_tokens: int) -> LLMClient:

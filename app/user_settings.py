@@ -34,6 +34,13 @@ LLM_PRESETS: dict[str, dict] = {
         "models": ["qwen-plus", "qwen-max", "qwen-turbo"],
         "key_url": "https://bailian.console.aliyun.com/?apiKey=1",
     },
+    "gemini": {
+        "label": "Google Gemini",
+        "provider": "openai_compatible",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "models": ["gemini-2.5-flash", "gemini-2.5-pro"],
+        "key_url": "https://aistudio.google.com/apikey",
+    },
     "openai": {
         "label": "OpenAI",
         "provider": "openai_compatible",
@@ -64,6 +71,13 @@ EMBEDDING_PRESETS: dict[str, dict] = {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "models": ["text-embedding-v3"],
         "key_url": "https://bailian.console.aliyun.com/?apiKey=1",
+    },
+    "gemini": {
+        "label": "Google Gemini embedding",
+        "provider": "api",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "models": ["gemini-embedding-001"],
+        "key_url": "https://aistudio.google.com/apikey",
     },
     "openai": {
         "label": "OpenAI embedding",

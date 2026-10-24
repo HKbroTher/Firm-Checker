@@ -2,7 +2,7 @@
 
 Seek 是一个桌面软件：给出企业名称和官网、新闻稿等公开资料，它会整理出这家企业的**业务线、产品类别和目标市场**，每条结论都标注来源，方便核实。
 
-- 使用你自己的 API：大模型支持 Claude、DeepSeek、通义千问、OpenAI 以及任何兼容 OpenAI 接口的服务；向量化默认使用硅基流动的 bge-m3（免费，中文效果好）
+- 使用你自己的 API：大模型支持 Claude、DeepSeek、通义千问、Gemini、OpenAI 以及任何兼容 OpenAI 接口的服务；向量化默认使用硅基流动的 bge-m3（免费，中文效果好）
 - 界面参照 AI 助手类桌面软件：左侧是研究过的企业，右侧是阅读排版的画像，底部是输入框
 - 支持 Windows 和 macOS，资料和密钥都只保存在本机
 
@@ -37,6 +37,7 @@ Seek 是一个桌面软件：给出企业名称和官网、新闻稿等公开资
 | Claude | console.anthropic.com | 默认 `claude-opus-5-5`，使用结构化输出，结果最稳定 |
 | DeepSeek | platform.deepseek.com | `deepseek-chat` |
 | 通义千问 | 阿里云百炼控制台 | `qwen-plus` / `qwen-max` |
+| Google Gemini | aistudio.google.com/apikey | `gemini-2.5-flash` / `gemini-2.5-pro`，可填写更新的模型名 |
 | OpenAI | platform.openai.com | 模型名可自行填写 |
 | 自定义 | — | 任何兼容 OpenAI 接口的服务，填写接口地址和模型名 |
 
@@ -45,7 +46,7 @@ Seek 是一个桌面软件：给出企业名称和官网、新闻稿等公开资
 | 服务商 | 说明 |
 |---|---|
 | 硅基流动 bge-m3 | **推荐**。免费，中英文效果都好，在 cloud.siliconflow.cn 注册获取密钥 |
-| 通义千问 / OpenAI / 自定义 | 兼容 OpenAI `/embeddings` 接口即可 |
+| 通义千问 / Gemini / OpenAI / 自定义 | 兼容 OpenAI `/embeddings` 接口即可（Gemini 使用 `gemini-embedding-001`） |
 | 本地小模型 | 不需要密钥、可离线，但以英文为主，中文效果一般；首次使用下载约 80MB |
 
 填好后点 **测试连接**，两项都显示「连接成功」再点 **保存**。
