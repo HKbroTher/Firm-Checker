@@ -7,7 +7,11 @@ from typing import Any
 
 import chromadb
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction, register_embedding_function
+from chromadb.utils.embedding_functions import (
+    DefaultEmbeddingFunction,
+    SentenceTransformerEmbeddingFunction,
+    register_embedding_function,
+)
 
 from .models import Chunk, SearchHit
 
@@ -47,10 +51,18 @@ class HashEmbeddingFunction(EmbeddingFunction[Documents]):
         return HashEmbeddingFunction(dim=config.get("dim", 512))
 
 
-def make_embedding_function(backend: str) -> EmbeddingFunction:
+def make_embedding_function(backend: str, model: str = "BAAI/bge-m3", device: str = "cpu") -> EmbeddingFunction:
     if backend == "hash":
         return HashEmbeddingFunction()
+    if backend == "bge-m3":
+        # 首次使用时从 Hugging Face 下载模型（约 2.3GB），可通过 HF_ENDPOINT 指定镜像
+        return SentenceTransformerEmbeddingFunction(model_name=model, device=device, normalize_embeddings=True)
     return DefaultEmbeddingFunction()
+
+
+def collection_name_for(base: str, backend: str) -> str:
+    """不同向量模型的维度不同，各用一个集合，切换模型时不会和旧数据冲突。"""
+    return f"{base}_{backend}"
 
 
 def _metadata(chunk: Chunk) -> dict[str, Any]:
@@ -67,8 +79,14 @@ class VectorStore:
         )
 
     @classmethod
-    def persistent(cls, path: str, collection_name: str, backend: str) -> "VectorStore":
-        return cls(chromadb.PersistentClient(path=path), collection_name, make_embedding_function(backend))
+    def persistent(
+        cls, path: str, collection_name: str, backend: str, model: str = "BAAI/bge-m3", device: str = "cpu"
+    ) -> "VectorStore":
+        return cls(
+            chromadb.PersistentClient(path=path),
+            collection_name_for(collection_name, backend),
+            make_embedding_function(backend, model, device),
+        )
 
     def add_chunks(self, chunks: list[Chunk], batch_size: int = 128) -> None:
         for i in range(0, len(chunks), batch_size):

@@ -13,7 +13,10 @@ class Settings(BaseSettings):
 
     chroma_dir: str = "./data/chroma"
     collection_name: str = "company_docs"
-    embedding_backend: Literal["default", "hash"] = "default"
+    # bge-m3：多语言（含中文）向量模型，1024 维；default：Chroma 内置 all-MiniLM-L6-v2（英文为主）；hash：离线测试用
+    embedding_backend: Literal["bge-m3", "default", "hash"] = "bge-m3"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_device: str = "cpu"  # 有 GPU 时设为 cuda
 
     chunk_size: int = 800
     chunk_overlap: int = 150

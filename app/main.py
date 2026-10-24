@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -10,13 +11,22 @@ from .models import CompanyProfile, IngestRequest, IngestResponse, ProfileReques
 from .profiler import InsufficientDataError, Profiler
 from .vectorstore import VectorStore
 
-app = FastAPI(title="Firm Checker - 企业信息检索 RAG 助手", version="0.1.0")
-
-
 @lru_cache
 def get_store() -> VectorStore:
     s = get_settings()
-    return VectorStore.persistent(s.chroma_dir, s.collection_name, s.embedding_backend)
+    return VectorStore.persistent(
+        s.chroma_dir, s.collection_name, s.embedding_backend, s.embedding_model, s.embedding_device
+    )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # 启动时加载向量模型，避免首个请求等待模型加载，模型缺失也能在启动阶段暴露
+    get_store()
+    yield
+
+
+app = FastAPI(title="Firm Checker - 企业信息检索 RAG 助手", version="0.1.0", lifespan=lifespan)
 
 
 @lru_cache
