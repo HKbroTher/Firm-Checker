@@ -151,6 +151,6 @@ def last_profile(company: str, state: AppState = Depends(get_state)) -> CompanyP
     return saved
 
 
-app = FastAPI(title="Seek - 企业信息检索 RAG 助手", version="0.2.0")
+app = FastAPI(title="Seek - 企业信息检索 RAG 助手", version="0.2.1")
 app.include_router(api)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

@@ -57,7 +57,7 @@ if sys.platform == "darwin":
         bundle_identifier="app.seek.desktop",
         info_plist={
             "CFBundleDisplayName": "Seek",
-            "CFBundleShortVersionString": "0.2.0",
+            "CFBundleShortVersionString": "0.2.1",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
         },

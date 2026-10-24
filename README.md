@@ -17,7 +17,7 @@ Seek 是一个桌面软件：给出企业名称和官网、新闻稿等公开资
 | Windows 10/11 | `Seek-Windows-x64.zip` | 解压后双击 `Seek\Seek.exe` |
 | macOS 11+（Apple 芯片） | `Seek-macOS-arm64.zip` | 解压后把 `Seek.app` 拖进「应用程序」 |
 
-发布正式版本时（推送 `v*` 标签，如 `git tag v0.2.0 && git push origin v0.2.0`），安装包会自动出现在 **Releases** 页面。
+发布正式版本时（推送 `v*` 标签，如 `git tag v0.2.1 && git push origin v0.2.1`），安装包会自动出现在 **Releases** 页面。
 
 **首次打开的提示**
 
